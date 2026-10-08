@@ -1,0 +1,35 @@
+[project]
+name = "video-enhance"
+version = "0.1.0"
+description = "Process images and videos. Models are added separately."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2",
+    "einops>=0.6",
+    "opencv-python>=4.8",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+    "gradio>=5.0",
+    "onnxruntime-gpu>=1.22,<1.23",
+    "nvidia-cublas-cu12",
+    "nvidia-cudnn-cu12",
+    "nvidia-cuda-runtime-cu12",
+    "nvidia-cuda-nvrtc-cu12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+video-enhance = "video_enhance.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

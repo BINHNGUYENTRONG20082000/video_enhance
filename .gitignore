@@ -1,0 +1,12 @@
+weights/
+outputs/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+*.part
+.streamlit/secrets.toml
