@@ -20,7 +20,7 @@ import numpy as np
 from video_enhance.io_ffmpeg import FFmpegError, probe, read_frame_at, require_ffmpeg
 from video_enhance.io_image import read_image
 from video_enhance.media import MediaTypeError
-from video_enhance.pipeline import build_pipeline
+from video_enhance.api import Enhancer
 from video_enhance.stages.hat import SCALE, MODELS
 
 
@@ -101,7 +101,7 @@ def render_video(
     _settings(sr_model, device)
     path = _require_video(video)
     destination = path.with_name(f"{path.stem}-enhanced.mp4")
-    pipeline = _open_pipeline(denoise, derain, deblur, defocus, enlight, superres, sr_model, tile, device, fp16)
+    enhancer = _enhancer(tile, device, fp16)
 
     def _callback(done: int, total: int | None) -> None:
         if progress is None:
@@ -111,10 +111,18 @@ def render_video(
         else:
             progress(0, desc=f"Frame {done}")
 
-    try:
-        pipeline.run_video(path, destination, progress=_callback)
-    finally:
-        pipeline.close()
+    enhancer.run(
+        path,
+        destination,
+        progress=_callback,
+        denoise=bool(denoise),
+        derain=bool(derain),
+        deblur=bool(deblur),
+        defocus=bool(defocus),
+        enlight=bool(enlight),
+        superres=bool(superres),
+        sr_model=sr_model,
+    )
     return str(destination), f"Đã ghi {destination.name}."
 
 
@@ -324,26 +332,8 @@ def _process(
     device: str,
     fp16: bool,
 ) -> np.ndarray:
-    pipeline = _open_pipeline(denoise, derain, deblur, defocus, enlight, superres, sr_model, tile, device, fp16)
-    try:
-        return pipeline.process_frame(frame)
-    finally:
-        pipeline.close()
-
-
-def _open_pipeline(
-    denoise: bool,
-    derain: bool,
-    deblur: bool,
-    defocus: bool,
-    enlight: bool,
-    superres: bool,
-    sr_model: str,
-    tile: int | float,
-    device: str,
-    fp16: bool,
-):
-    return build_pipeline(
+    return _enhancer(tile, device, fp16).process_frame(
+        frame,
         denoise=bool(denoise),
         derain=bool(derain),
         deblur=bool(deblur),
@@ -351,10 +341,11 @@ def _open_pipeline(
         enlight=bool(enlight),
         superres=bool(superres),
         sr_model=sr_model,
-        device=device,
-        tile=int(tile),
-        fp16=bool(fp16),
     )
+
+
+def _enhancer(tile: int | float, device: str, fp16: bool) -> Enhancer:
+    return Enhancer(device=device, tile=int(tile), fp16=bool(fp16))
 
 
 def _settings(sr_model: str, device: str) -> None:

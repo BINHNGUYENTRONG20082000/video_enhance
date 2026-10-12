@@ -219,21 +219,33 @@ def build_pipeline(
     device: str = "auto",
     tile: int = 512,
     fp16: bool = False,
+    weights_dir: Path | None = None,
 ) -> Pipeline:
+    from video_enhance.paths import resolve_weights_dir
+
+    root = resolve_weights_dir(weights_dir)
     selected = {"denoise": denoise, "derain": derain, "deblur": deblur, "defocus": defocus}
     stages: list[Stage] = []
     if any(selected.values()):
         from video_enhance.stages.restormer import TASKS, RestormerStage
 
+        folder = root / "restormer"
         for task in TASKS:
             if selected[task.key]:
                 stages.append(
-                    RestormerStage(task.key, task.weights, task.layer_norm, device, tile, fp16)
+                    RestormerStage(
+                        task.key,
+                        folder / task.weights.name,
+                        task.layer_norm,
+                        device,
+                        tile,
+                        fp16,
+                    )
                 )
     if enlight:
-        stages.append(EnlightenStage(device))
+        stages.append(EnlightenStage(device, root))
     if superres:
-        stages.append(HatStage(model_by_key(sr_model), device, tile, fp16))
+        stages.append(HatStage(model_by_key(sr_model), device, tile, fp16, root / "hat"))
     return Pipeline(stages)
 
 

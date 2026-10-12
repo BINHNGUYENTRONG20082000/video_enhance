@@ -1,6 +1,10 @@
 ## Restormer: Efficient Transformer for High-Resolution Image Restoration
 ## Syed Waqas Zamir, Aditya Arora, Salman Khan, Munawar Hayat, Fahad Shahbaz Khan, and Ming-Hsuan Yang
 ## https://arxiv.org/abs/2111.09881
+##
+## Adapted from https://github.com/swz30/Restormer
+## Copyright (c) 2022 Syed Waqas Zamir and contributors
+## Released under the MIT License. See SOURCES.md.
 
 
 import numbers

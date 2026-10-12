@@ -12,9 +12,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from video_enhance.paths import resolve_weights_dir
 from video_enhance.stages.restormer_arch import Restormer
 
-WEIGHTS_DIR = Path(__file__).resolve().parents[3] / "weights" / "restormer"
+WEIGHTS_DIR = resolve_weights_dir() / "restormer"
 DENOISE_WEIGHTS = WEIGHTS_DIR / "real_denoising.pth"
 DERAIN_WEIGHTS = WEIGHTS_DIR / "deraining.pth"
 DEBLUR_WEIGHTS = WEIGHTS_DIR / "motion_deblurring.pth"

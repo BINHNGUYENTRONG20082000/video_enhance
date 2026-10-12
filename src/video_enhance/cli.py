@@ -6,11 +6,11 @@ import argparse
 import sys
 from pathlib import Path
 
+from video_enhance.api import Enhancer
 from video_enhance.config import ConfigError, load_config
 from video_enhance.io_ffmpeg import FFmpegError
 from video_enhance.io_image import write_image
 from video_enhance.media import MediaTypeError
-from video_enhance.pipeline import build_pipeline
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -19,7 +19,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.config:
             load_config(args.config)
-        pipeline = build_pipeline(
+        enhancer = Enhancer(device=args.device, tile=args.tile, fp16=args.fp16)
+        tools = dict(
             denoise=args.denoise,
             derain=args.derain,
             deblur=args.deblur,
@@ -27,23 +28,16 @@ def main(argv: list[str] | None = None) -> int:
             enlight=args.enlight,
             superres=args.superres,
             sr_model=args.sr_model,
-            device=args.device,
-            tile=args.tile,
-            fp16=args.fp16,
         )
-        try:
-            if args.command == "preview":
-                frame = pipeline.preview_frame(args.input, args.frame)
-                write_image(args.output, frame)
-                print(f"wrote {args.output}")
-                return 0
-            pipeline.run(args.input, args.output, progress=_print_progress)
-            if _is_video(args.input):
-                print()
+        if args.command == "preview":
+            write_image(args.output, enhancer.preview(args.input, args.frame, **tools))
             print(f"wrote {args.output}")
             return 0
-        finally:
-            pipeline.close()
+        enhancer.run(args.input, args.output, progress=_print_progress, **tools)
+        if _is_video(args.input):
+            print()
+        print(f"wrote {args.output}")
+        return 0
     except (FFmpegError, ConfigError, MediaTypeError, RuntimeError, OSError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

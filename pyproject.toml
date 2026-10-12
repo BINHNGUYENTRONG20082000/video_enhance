@@ -1,7 +1,7 @@
 [project]
 name = "video-enhance"
 version = "0.1.0"
-description = "Process images and videos. Models are added separately."
+description = "Library for local image and video restoration with Restormer, EnlightenGAN, and HAT."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -10,7 +10,6 @@ dependencies = [
     "opencv-python>=4.8",
     "numpy>=1.24",
     "pyyaml>=6.0",
-    "gradio>=5.0",
     "onnxruntime-gpu>=1.22,<1.23",
     "nvidia-cublas-cu12",
     "nvidia-cudnn-cu12",
@@ -19,7 +18,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+ui = ["gradio>=5.0"]
+dev = ["pytest>=8.0", "gradio>=5.0"]
 
 [project.scripts]
 video-enhance = "video_enhance.cli:main"

@@ -116,7 +116,9 @@ def _preprocess(image: np.ndarray) -> np.ndarray:
 
 
 def _default_weights_dir() -> Path:
-    return Path(__file__).resolve().parents[3] / "weights"
+    from video_enhance.paths import resolve_weights_dir
+
+    return resolve_weights_dir()
 
 
 def _register_nvidia_dlls() -> None:

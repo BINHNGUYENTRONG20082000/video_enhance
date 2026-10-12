@@ -2,7 +2,7 @@
 
 Pipeline local để khôi phục và phóng to ảnh hoặc video. CLI và giao diện Gradio dùng chung một pipeline. Mỗi công cụ là một model riêng. Tại một thời điểm chỉ một model nằm trong VRAM: model chạy xong thì được giải phóng, rồi model kế tiếp mới được nạp.
 
-Audio của video được giữ từ file gốc và gắn lại ở lần ghi cuối.
+Audio của video được giữ từ file gốc và gắn lại ở lần ghi cuối. Phần mềm khác tích hợp bằng lớp `Enhancer`. Giao diện Gradio và lệnh `video-enhance` chỉ là hai cách gọi lớp đó.
 
 ## Cài đặt
 
@@ -19,10 +19,10 @@ python -m venv .venv
 .venv\Scripts\activate
 python -m pip install --upgrade pip
 pip install torch --index-url https://download.pytorch.org/whl/cu126
-pip install -e ".[dev]"
+pip install -e ".[ui,dev]"
 ```
 
-`pip install -e ".[dev]"` cài Gradio, OpenCV, ONNX Runtime GPU, các gói CUDA DLL (`nvidia-cublas`, `nvidia-cudnn`, `nvidia-cuda-runtime`, `nvidia-cuda-nvrtc`) và pytest. Trên Windows, EnlightenGAN tự đăng ký các thư mục DLL đó trước khi tạo session ONNX.
+`pip install -e .` chỉ cài thư viện. `.[ui]` thêm Gradio. `.[dev]` thêm pytest và Gradio. OpenCV, ONNX Runtime GPU và các gói CUDA DLL (`nvidia-cublas`, `nvidia-cudnn`, `nvidia-cuda-runtime`, `nvidia-cuda-nvrtc`) nằm trong thư viện. Trên Windows, EnlightenGAN tự đăng ký các thư mục DLL đó trước khi tạo session ONNX.
 
 Kiểm tra:
 
@@ -47,6 +47,32 @@ Thư mục `weights/` không nằm trong git. Máy bàn giao cần copy nguyên 
 | `weights/enlighten.onnx` | Enlight | Đã có, hoặc tự tải lần đầu |
 
 Nếu file HAT thiếu hoặc nhỏ hơn 150 MB, `ensure_weights` tải lại và đối chiếu SHA-256. File đủ lớn nhưng hỏng thì xóa đi rồi chạy lại. Nguồn và mã hash nằm trong [SOURCES.md](SOURCES.md).
+
+## Tích hợp vào phần mềm khác
+
+```python
+from video_enhance import Enhancer
+import numpy as np
+
+frame = np.zeros((64, 64, 3), dtype=np.uint8)  # RGB, uint8, (cao, rộng, 3)
+
+with Enhancer(device="cuda", tile=512, fp16=True) as enhancer:
+    restored = enhancer.process_frame(frame, denoise=True, deblur=True)
+    enlarged = enhancer.process_frame(frame, superres=True, sr_model="real-hat-gan")
+    enhancer.run("input.mp4", "output.mp4", enlight=True, superres=True, sr_model="hat-l")
+```
+
+`process_frame` trả về một mảng mới. `run` ghi file. `preview(path, frame=0)` xử lý một frame của video, hoặc cả một ảnh. Mỗi lần gọi tự nạp model, chạy, rồi giải phóng VRAM. Không cần giữ model giữa hai lần gọi.
+
+Weight mặc định là thư mục `weights` của checkout này. Phần mềm nhúng có thể trỏ chỗ khác:
+
+```python
+Enhancer(weights_dir=r"D:\models\video_enhance")
+```
+
+Hoặc đặt biến môi trường `VIDEO_ENHANCE_WEIGHTS` tới thư mục cha của `restormer`, `hat` và `enlighten.onnx`.
+
+`sr_model` nhận `hat-l` hoặc `real-hat-gan`. Cả hai phóng x4. `device` nhận `auto`, `cuda`, `cpu`. `tile=0` đưa cả khung vào model.
 
 ## Chạy
 
@@ -90,6 +116,8 @@ Thứ tự khi bật nhiều công cụ: denoise, derain, deblur, defocus, enlig
 
 ```text
 app.py                         Giao diện Gradio
+src/video_enhance/api.py       Lớp Enhancer, API để nhúng
+src/video_enhance/paths.py     Tìm thư mục weights
 src/video_enhance/cli.py       Lệnh video-enhance
 src/video_enhance/pipeline.py  Ghép stage, xử lý ảnh và video
 src/video_enhance/media.py     Phân loại đuôi ảnh / video

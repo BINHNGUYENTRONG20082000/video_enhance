@@ -15,12 +15,13 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from video_enhance.paths import resolve_weights_dir
 from video_enhance.stages.hat_arch import HAT
 
 SCALE = 4
 WINDOW = 16
 TILE_PAD = 32
-WEIGHTS_DIR = Path(__file__).resolve().parents[3] / "weights" / "hat"
+WEIGHTS_DIR = resolve_weights_dir() / "hat"
 
 _SHARED = dict(
     upscale=SCALE,
@@ -77,13 +78,21 @@ MODELS: tuple[HatModel, ...] = (
 
 
 class HatStage:
-    def __init__(self, model: HatModel, device: str = "auto", tile: int = 512, fp16: bool = False) -> None:
+    def __init__(
+        self,
+        model: HatModel,
+        device: str = "auto",
+        tile: int = 512,
+        fp16: bool = False,
+        weights_dir: Path | None = None,
+    ) -> None:
         self.model = model
         self.name = model.key
         self.scale = SCALE
         self.device_name = device
         self.tile = int(tile)
         self.fp16 = bool(fp16)
+        self.weights_dir = Path(weights_dir) if weights_dir is not None else WEIGHTS_DIR
         self._dtype = torch.float32
         self._network = None
         self._device = torch.device("cpu")
@@ -91,7 +100,7 @@ class HatStage:
     def load(self) -> None:
         if self._network is not None:
             return
-        weights = ensure_weights(self.model)
+        weights = ensure_weights(self.model, self.weights_dir)
         self._device = _resolve_device(self.device_name)
         network = build_network(self.model)
         _load_weights(network, weights)
