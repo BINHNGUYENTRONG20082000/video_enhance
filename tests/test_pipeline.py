@@ -37,10 +37,16 @@ def test_stages_run_in_order():
     pipeline = Pipeline(stages)
     frame = np.zeros((2, 2, 3), dtype=np.uint8)
     output = pipeline.process_frame(frame)
-    assert log == ["load:denoise", "load:superres", "denoise", "superres"]
+    assert log == [
+        "load:denoise",
+        "denoise",
+        "close:denoise",
+        "load:superres",
+        "superres",
+        "close:superres",
+    ]
     assert int(output[0, 0, 0]) == 2
-    pipeline.close()
-    assert log[-2:] == ["close:denoise", "close:superres"]
+    assert log.index("close:denoise") < log.index("load:superres")
 
 
 def test_image_round_trip_keeps_pixels(tmp_path: Path):

@@ -25,6 +25,8 @@ def main(argv: list[str] | None = None) -> int:
             deblur=args.deblur,
             defocus=args.defocus,
             enlight=args.enlight,
+            superres=args.superres,
+            sr_model=args.sr_model,
             device=args.device,
             tile=args.tile,
             fp16=args.fp16,
@@ -65,11 +67,13 @@ def build_parser() -> argparse.ArgumentParser:
 def _add_input(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("input", type=Path)
     parser.add_argument("--config", type=Path)
-    parser.add_argument("--denoise", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--denoise", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--derain", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--deblur", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--deblur", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--defocus", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--enlight", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--enlight", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--superres", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--sr-model", choices=["hat-l", "real-hat-gan"], default="hat-l")
     parser.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
     parser.add_argument("--tile", type=int, default=512)
     parser.add_argument("--fp16", action=argparse.BooleanOptionalAction, default=True)

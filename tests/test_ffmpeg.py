@@ -61,6 +61,33 @@ def test_round_trip_keeps_size_audio_and_frames(tmp_path: Path):
     assert float(np.abs(original.astype(np.int16) - copied.astype(np.int16)).mean()) < 20
 
 
+def test_video_releases_one_stage_before_the_next(tmp_path: Path):
+    source = tmp_path / "in.mp4"
+    destination = tmp_path / "out.mp4"
+    _make_clip(source)
+    log: list[str] = []
+
+    class _Stage:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def load(self) -> None:
+            log.append(f"load:{self.name}")
+
+        def process(self, frame: np.ndarray) -> np.ndarray:
+            log.append(self.name)
+            return frame
+
+        def close(self) -> None:
+            log.append(f"close:{self.name}")
+
+    Pipeline([_Stage("first"), _Stage("second")]).run_video(source, destination)
+    assert log.index("close:first") < log.index("load:second")
+    assert log.count("first") == log.count("second") > 0
+    assert not list(tmp_path.glob(".*.pass*.mp4"))
+    assert destination.is_file()
+
+
 def test_preview_frame_and_out_of_range(tmp_path: Path):
     source = tmp_path / "in.mp4"
     _make_clip(source)

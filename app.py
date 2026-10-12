@@ -1,12 +1,14 @@
 """Thin Gradio UI over the shared image and video pipeline.
 
-Stage controls stay on screen. Four Restormer tasks plus EnlightenGAN are selectable.
+Stage controls stay on screen. Four Restormer tasks, EnlightenGAN, and two HAT x4
+super-resolution models are selectable.
 """
 
 from __future__ import annotations
 
+import asyncio
+import os
 import sys
-import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -19,13 +21,10 @@ from video_enhance.io_ffmpeg import FFmpegError, probe, read_frame_at, require_f
 from video_enhance.io_image import read_image
 from video_enhance.media import MediaTypeError
 from video_enhance.pipeline import build_pipeline
-
-_CACHED = None
-_CACHE_KEY = None
-_CACHE_LOCK = threading.Lock()
+from video_enhance.stages.hat import SCALE, MODELS
 
 
-def describe_video(video, image, superres: bool, scale: int | float | str) -> str:
+def describe_video(video, image, superres: bool, sr_model: str) -> str:
     video_path = _media_path(video)
     if video_path is not None:
         require_ffmpeg()
@@ -41,8 +40,12 @@ def describe_video(video, image, superres: bool, scale: int | float | str) -> st
         frame = read_image(image_path)
         height, width = frame.shape[:2]
         details = f"{width}×{height}. "
-    output_scale = int(scale) if superres else 1
-    return details + f"Đầu ra dự kiến: {width * output_scale}×{height * output_scale}."
+    _settings(sr_model, "auto")
+    output_scale = SCALE if superres else 1
+    model_text = ""
+    if superres:
+        model_text = f" Model: {_model_label(sr_model)}."
+    return details + f"Đầu ra dự kiến: {width * output_scale}×{height * output_scale}.{model_text}"
 
 
 def preview_video(
@@ -54,25 +57,29 @@ def preview_video(
     defocus: bool,
     enlight: bool,
     superres: bool,
-    scale: int | float | str,
+    sr_model: str,
     tile: int | float,
     device: str,
     fp16: bool,
 ) -> tuple[np.ndarray, np.ndarray, str]:
-    _settings(scale, device)
+    _settings(sr_model, device)
     video_path = _media_path(video)
     image_path = _media_path(image)
     if video_path is not None:
         if not video_path.is_file():
             raise gr.Error(f"Không tìm thấy video: {video_path}")
         original = read_frame_at(video_path, 0)
-        enhanced = _process(original, denoise, derain, deblur, defocus, enlight, tile, device, fp16)
+        enhanced = _process(
+            original, denoise, derain, deblur, defocus, enlight, superres, sr_model, tile, device, fp16
+        )
         return original, enhanced, "Đã xem trước frame 0."
     if image_path is not None:
         if not image_path.is_file():
             raise gr.Error(f"Không tìm thấy ảnh: {image_path}")
         original = read_image(image_path)
-        enhanced = _process(original, denoise, derain, deblur, defocus, enlight, tile, device, fp16)
+        enhanced = _process(
+            original, denoise, derain, deblur, defocus, enlight, superres, sr_model, tile, device, fp16
+        )
         return original, enhanced, "Đã xem trước ảnh."
     raise gr.Error("Hãy chọn một video hoặc một ảnh.")
 
@@ -85,17 +92,16 @@ def render_video(
     defocus: bool,
     enlight: bool,
     superres: bool,
-    scale: int | float | str,
+    sr_model: str,
     tile: int | float,
     device: str,
     fp16: bool,
     progress=gr.Progress(),
 ) -> tuple[str, str]:
-    _settings(scale, device)
-    del superres
+    _settings(sr_model, device)
     path = _require_video(video)
     destination = path.with_name(f"{path.stem}-enhanced.mp4")
-    pipeline = _pipeline(denoise, derain, deblur, defocus, enlight, tile, device, fp16)
+    pipeline = _open_pipeline(denoise, derain, deblur, defocus, enlight, superres, sr_model, tile, device, fp16)
 
     def _callback(done: int, total: int | None) -> None:
         if progress is None:
@@ -105,7 +111,10 @@ def render_video(
         else:
             progress(0, desc=f"Frame {done}")
 
-    pipeline.run_video(path, destination, progress=_callback)
+    try:
+        pipeline.run_video(path, destination, progress=_callback)
+    finally:
+        pipeline.close()
     return str(destination), f"Đã ghi {destination.name}."
 
 
@@ -115,7 +124,8 @@ def build_demo() -> gr.Blocks:
         gr.Markdown(
             "Bốn model Restormer nằm trong weights/restormer: real denoising, deraining, "
             "motion deblurring, defocus deblurring. Enlight dùng EnlightenGAN. "
-            "Super resolution chưa gắn model. Mỗi frame xử lý riêng, video có thể nhấp nháy nhẹ."
+            "Super resolution x4 chọn HAT-L hoặc Real HAT GAN. Mọi công cụ tắt sẵn, bật đúng công cụ cần dùng. "
+            "Mỗi frame xử lý riêng, video có thể nhấp nháy nhẹ."
         )
         ffmpeg_note = _ffmpeg_note()
         if ffmpeg_note:
@@ -127,14 +137,19 @@ def build_demo() -> gr.Blocks:
                 image = gr.Image(label="Ảnh đầu vào", type="filepath", sources=["upload"], format="png")
             with gr.Column():
                 with gr.Row():
-                    denoise = gr.Checkbox(value=True, label="Real denoising")
+                    denoise = gr.Checkbox(value=False, label="Real denoising")
                     derain = gr.Checkbox(value=False, label="Deraining")
-                    deblur = gr.Checkbox(value=True, label="Motion deblurring")
+                    deblur = gr.Checkbox(value=False, label="Motion deblurring")
                     defocus = gr.Checkbox(value=False, label="Defocus deblurring")
                 with gr.Row():
-                    enlight = gr.Checkbox(value=True, label="Enlight")
-                    superres = gr.Checkbox(value=True, label="Super resolution")
-                scale = gr.Radio(choices=[2, 4], value=2, label="Scale siêu phân giải")
+                    enlight = gr.Checkbox(value=False, label="Enlight")
+                    superres = gr.Checkbox(value=False, label="Super resolution x4")
+                sr_model = gr.Radio(
+                    choices=[(model.label, model.key) for model in MODELS],
+                    value="hat-l",
+                    label="Model siêu phân giải",
+                    interactive=False,
+                )
                 tile = gr.Slider(
                     minimum=0,
                     maximum=4096,
@@ -147,7 +162,11 @@ def build_demo() -> gr.Blocks:
                 fp16 = gr.Checkbox(value=True, label="FP16 trên CUDA")
 
         gr.Markdown(
-            "Video 1080p với scale 4 ra khung 4K. Tile và FP16 là cách giữ VRAM. Mặc định scale là 2."
+            "Cả hai model phóng x4: video 1080p ra khung 4K. HAT-L là bản lớn nhất, 12 nhóm, "
+            "huấn luyện ImageNet. Real HAT GAN là bản GAN cho ảnh thật, 6 nhóm — đây là kích thước "
+            "lớn nhất mà nhóm tác giả phát hành cho Real HAT GAN. Mỗi lượt chỉ một model trong VRAM: "
+            "model chạy xong thì được giải phóng, rồi mới tới model sau. Tile và FP16 giữ VRAM. "
+            "Với HAT, ô FP16 chạy bằng BF16 vì FP16 làm tràn số."
         )
         info = gr.Textbox(label="Thông tin", interactive=False)
         status = gr.Textbox(label="Trạng thái", interactive=False)
@@ -159,19 +178,137 @@ def build_demo() -> gr.Blocks:
             enhanced = gr.Image(label="Đã xử lý", type="numpy", format="png")
         output = gr.Video(label="Video đã xử lý")
 
-        task_inputs = [denoise, derain, deblur, defocus, enlight, superres, scale, tile, device, fp16]
+        task_inputs = [denoise, derain, deblur, defocus, enlight, superres, sr_model, tile, device, fp16]
         preview_inputs = [video, image, *task_inputs]
         render_inputs = [video, *task_inputs]
-        for trigger in (video.change, image.change, scale.change, superres.change):
-            trigger(_guard(describe_video), inputs=[video, image, superres, scale], outputs=info)
-        superres.change(lambda enabled: gr.update(interactive=enabled), inputs=superres, outputs=scale)
+        for trigger in (video.change, image.change, sr_model.change, superres.change):
+            trigger(_guard(describe_video), inputs=[video, image, superres, sr_model], outputs=info)
+        superres.change(lambda enabled: gr.update(interactive=enabled), inputs=superres, outputs=sr_model)
         preview_button.click(_guard(preview_video), inputs=preview_inputs, outputs=[original, enhanced, status])
         render_button.click(_guard(render_video), inputs=render_inputs, outputs=[output, status])
     return demo
 
 
 def main() -> None:
+    _install_gradio_file_serving()
     build_demo().queue().launch()
+
+
+def _install_gradio_file_serving() -> None:
+    """Publish an upload before Gradio tells the browser its URL.
+
+    On Windows the player then range-requests that file immediately. If the
+    cache move or a virus scan still holds it, the open fails with
+    PermissionError and the preview request dies.
+    """
+    import gradio.route_utils as route_utils
+    import gradio.routes as routes
+    import gradio.static_server as static_server
+
+    current = route_utils.upload_fn
+    if not getattr(current, "_publishes_before_response", False):
+        wrapped = _publishing_upload(current)
+        route_utils.upload_fn = wrapped
+        routes.upload_fn = wrapped
+        static_server.upload_fn = wrapped
+    if sys.platform == "win32":
+        _retry_locked_gradio_reads()
+
+
+def _publishing_upload(original):
+    async def upload_fn(*args, **kwargs):
+        kwargs["force_move"] = True
+        return await original(*args, **kwargs)
+
+    upload_fn._publishes_before_response = True
+    return upload_fn
+
+
+def _retry_locked_gradio_reads() -> None:
+    import anyio
+    from gradio._vendor import aiofiles
+
+    if not getattr(anyio.open_file, "_retries_gradio_lock", False):
+        anyio.open_file = _wrap_open(anyio.open_file)
+    if not getattr(aiofiles.open, "_retries_gradio_lock", False):
+        aiofiles.open = _wrap_aiofiles_open(aiofiles.open)
+
+
+def _wrap_open(original):
+    async def open_file(path, *args, **kwargs):
+        return await _call_with_permission_retry(original, path, *args, **kwargs)
+
+    open_file._retries_gradio_lock = True
+    return open_file
+
+
+def _wrap_aiofiles_open(original):
+    def open_file(path, *args, **kwargs):
+        return _RetryingAiofile(original, path, args, kwargs)
+
+    open_file._retries_gradio_lock = True
+    return open_file
+
+
+class _RetryingAiofile:
+    """Match aiofiles.open: callable returns an async context manager, not a coroutine."""
+
+    def __init__(self, original, path, args, kwargs, attempts: int = 12, sleep=None):
+        self._original = original
+        self._path = path
+        self._args = args
+        self._kwargs = kwargs
+        self._attempts = attempts
+        self._sleep = sleep
+        self._manager = None
+
+    def __await__(self):
+        return self._acquire().__await__()
+
+    async def __aenter__(self):
+        return await self._acquire()
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if self._manager is None:
+            return False
+        return await self._manager.__aexit__(exc_type, exc, tb)
+
+    async def _acquire(self):
+        sleep = self._sleep or asyncio.sleep
+        delay = 0.05
+        for attempt in range(self._attempts):
+            manager = self._original(self._path, *self._args, **self._kwargs)
+            try:
+                opened = await manager
+            except PermissionError:
+                if attempt + 1 == self._attempts or not _is_gradio_temp(self._path):
+                    raise
+                await sleep(delay)
+                delay = min(delay * 1.5, 0.4)
+                continue
+            self._manager = manager
+            return opened
+
+
+async def _call_with_permission_retry(op, path, *args, attempts: int = 12, sleep=None, **kwargs):
+    if sleep is None:
+        sleep = asyncio.sleep
+    delay = 0.05
+    for attempt in range(attempts):
+        try:
+            return await op(path, *args, **kwargs)
+        except PermissionError:
+            if attempt + 1 == attempts or not _is_gradio_temp(path):
+                raise
+            await sleep(delay)
+            delay = min(delay * 1.5, 0.4)
+
+
+def _is_gradio_temp(path) -> bool:
+    if isinstance(path, int):
+        return False
+    text = os.fspath(path).replace("/", os.sep)
+    return f"{os.sep}gradio{os.sep}" in text
 
 
 def _process(
@@ -181,61 +318,56 @@ def _process(
     deblur: bool,
     defocus: bool,
     enlight: bool,
+    superres: bool,
+    sr_model: str,
     tile: int | float,
     device: str,
     fp16: bool,
 ) -> np.ndarray:
-    return _pipeline(denoise, derain, deblur, defocus, enlight, tile, device, fp16).process_frame(frame)
+    pipeline = _open_pipeline(denoise, derain, deblur, defocus, enlight, superres, sr_model, tile, device, fp16)
+    try:
+        return pipeline.process_frame(frame)
+    finally:
+        pipeline.close()
 
 
-def _pipeline(
+def _open_pipeline(
     denoise: bool,
     derain: bool,
     deblur: bool,
     defocus: bool,
     enlight: bool,
+    superres: bool,
+    sr_model: str,
     tile: int | float,
     device: str,
     fp16: bool,
 ):
-    global _CACHED, _CACHE_KEY
-    key = (
-        bool(denoise),
-        bool(derain),
-        bool(deblur),
-        bool(defocus),
-        bool(enlight),
-        int(tile),
-        device,
-        bool(fp16),
+    return build_pipeline(
+        denoise=bool(denoise),
+        derain=bool(derain),
+        deblur=bool(deblur),
+        defocus=bool(defocus),
+        enlight=bool(enlight),
+        superres=bool(superres),
+        sr_model=sr_model,
+        device=device,
+        tile=int(tile),
+        fp16=bool(fp16),
     )
-    with _CACHE_LOCK:
-        if _CACHED is not None and _CACHE_KEY == key:
-            return _CACHED
-        if _CACHED is not None:
-            _CACHED.close()
-        pipeline = build_pipeline(
-            denoise=bool(denoise),
-            derain=bool(derain),
-            deblur=bool(deblur),
-            defocus=bool(defocus),
-            enlight=bool(enlight),
-            device=device,
-            tile=int(tile),
-            fp16=bool(fp16),
-        )
-        pipeline.load()
-        _CACHED = pipeline
-        _CACHE_KEY = key
-        return pipeline
 
 
-def _settings(scale: int | float | str, device: str) -> None:
-    chosen = int(scale)
-    if chosen not in (2, 4):
-        raise ValueError("Scale phải là 2 hoặc 4.")
+def _settings(sr_model: str, device: str) -> None:
+    _model_label(sr_model)
     if device not in {"auto", "cuda", "cpu"}:
         raise ValueError("Thiết bị phải là auto, cuda hoặc cpu.")
+
+
+def _model_label(sr_model: str) -> str:
+    for model in MODELS:
+        if model.key == sr_model:
+            return model.label
+    raise ValueError("Model siêu phân giải phải là HAT-L x4 hoặc Real HAT GAN x4.")
 
 
 def _media_path(value) -> Path | None:

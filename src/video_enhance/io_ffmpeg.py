@@ -136,6 +136,7 @@ def open_encoder(
     height: int,
     fps_expr: str,
     has_audio: bool,
+    lossless: bool = False,
 ) -> subprocess.Popen[bytes]:
     require_ffmpeg()
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -161,21 +162,24 @@ def open_encoder(
     ]
     if has_audio:
         command.extend(["-map", "1:a:0", "-c:a", "copy"])
-    command.extend(
-        [
-            "-c:v",
-            "libx264",
-            "-preset",
-            "medium",
-            "-crf",
-            "18",
-            "-pix_fmt",
-            "yuv420p",
-            "-movflags",
-            "+faststart",
-            str(destination),
-        ]
-    )
+    if lossless:
+        command.extend(["-c:v", "libx264rgb", "-preset", "ultrafast", "-qp", "0", "-pix_fmt", "rgb24"])
+    else:
+        command.extend(
+            [
+                "-c:v",
+                "libx264",
+                "-preset",
+                "medium",
+                "-crf",
+                "18",
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+            ]
+        )
+    command.append(str(destination))
     return subprocess.Popen(
         command,
         stdin=subprocess.PIPE,

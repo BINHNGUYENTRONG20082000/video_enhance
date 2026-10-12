@@ -25,7 +25,7 @@ def test_run_image(tmp_path: Path):
     destination = tmp_path / "out.png"
     original = np.full((6, 6, 3), 40, dtype=np.uint8)
     write_image(source, original)
-    assert main(["run", str(source), "-o", str(destination), "--no-denoise", "--no-deblur", "--no-enlight"]) == 0
+    assert main(["run", str(source), "-o", str(destination)]) == 0
     assert np.array_equal(read_image(destination), original)
 
 
