@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/v1", tags=["Image processing"])
 
 @router.get("/health")
 def health():
-    required = {"crop_rotate", "filter", "histogram"} | {
+    required = {"filter", "histogram"} | {
         "color", "gamma_levels", "lighting", "clahe", "clarity", "texture",
         "sharpen", "deblur", "dehaze", "vignette", "up_down"}
     missing = sorted(required - MODULES.keys())
@@ -88,7 +88,7 @@ def decode_image(payload):
         image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
     if image.ndim != 3 or image.shape[2] != 3:
         raise HTTPException(415, "Số kênh ảnh không được hỗ trợ")
-    # Chuẩn hóa EXIF để khung crop trên web khớp hướng ảnh người dùng thấy.
+    # Chuẩn hóa EXIF theo hướng hiển thị của ảnh gốc.
     if orientation == 2:
         image = cv2.flip(image, 1)
     elif orientation == 3:

@@ -109,7 +109,7 @@ def discover():
 
 
 def editor_image(value):
-    """Ảnh RGB đã crop từ ImageEditor; không dùng ảnh kết quả làm đầu vào."""
+    """Chuẩn hóa ảnh RGB đầu vào; không dùng ảnh kết quả làm nguồn."""
     if value is None:
         return None
     image = value.get("composite") if isinstance(value, dict) else value
@@ -126,34 +126,13 @@ def editor_image(value):
     return np.ascontiguousarray(image[:, :, :3])
 
 
-def rotate_source(mods, image, values):
-    source = editor_image(image)
-    if source is None:
-        return None
-    bgr = cv2.cvtColor(source, cv2.COLOR_RGB2BGR)
-    rotated, _ = mods["crop_rotate"].process(bgr, {
-        "rotate_fixed": values.get("rotate_fixed", 0),
-        "angle": values.get("angle", 0), "expand": True,
-    })
-    return cv2.cvtColor(rotated, cv2.COLOR_BGR2RGB)
-
-
-def process_pipeline(mods, image, values, cropped=None):
-    """Chạy từ nguồn: hình học → khử nhiễu → khử mờ → khử sương → màu → ánh sáng
-    → CLAHE → độ trong → chi tiết bề mặt → độ nét → viền → kích thước đầu ra.
-
-    cropped là ảnh nguồn đã xoay/cắt, không chứa các hiệu ứng của pipeline.
-    Histogram là đầu ra phụ, không thay thế ảnh kết quả.
-    """
+def process_pipeline(mods, image, values):
+    """Chạy các bộ lọc từ ảnh nguồn RGB, resize ở cuối và trả histogram riêng."""
     source = editor_image(image)
     if source is None:
         return None, None, {"steps": []}
-    source = editor_image(cropped) if cropped is not None else rotate_source(mods, source, values)
     result = cv2.cvtColor(source, cv2.COLOR_RGB2BGR)
-    steps = [{"module": "crop_rotate", "params": {
-        "rotate_fixed": values.get("rotate_fixed", 0), "angle": values.get("angle", 0),
-    }, "crop_applied": cropped is not None,
-        "output_size": {"w": result.shape[1], "h": result.shape[0]}}]
+    steps = []
 
     def apply(module_id, params):
         nonlocal result
@@ -213,7 +192,7 @@ def control_schema():
         ("color", "Màu sắc", ("color",)),
         ("detail", "Chi tiết", ("deblur", "sharpen", "texture")),
         ("effects", "Hiệu ứng", ("clarity", "dehaze", "vignette")),
-        ("geometry", "Cắt / Xoay / Kích thước", ("up_down",)),
+        ("geometry", "Kích thước ảnh", ("up_down",)),
     ]
     def public_spec(spec):
         return {k: v for k, v in spec.items() if k not in ("param", "transform")}
@@ -224,10 +203,6 @@ def control_schema():
                 controls[name] = public_spec(spec)
         if group_id == "lighting":
             controls["clahe_enabled"] = {"type": "bool", "default": False, "label": "Bật tăng tương phản"}
-        if group_id == "geometry":
-            controls["rotate_fixed"] = {"type": "enum", "values": [0, 90, 180, 270], "default": 0, "label": "Xoay ảnh"}
-            controls["angle"] = {"type": "float", "min": -180, "max": 180, "step": 0.1, "default": 0, "label": "Căn thẳng"}
-            controls["crop"] = {"type": "rect", "default": None, "label": "Vùng cắt", "fields": ["x", "y", "width", "height"], "coordinates": "rotated_image_pixels"}
         groups.append({"id": group_id, "label": label, "controls": controls})
     controls = {}
     for method, profile in FILTER_CONTROLS.items():
@@ -254,16 +229,7 @@ def validate_settings(settings):
     for name, value in settings.items():
         spec = schema[name]
         kind = spec["type"]
-        if kind == "rect":
-            if value is None:
-                continue
-            if not isinstance(value, dict) or set(value) != {"x", "y", "width", "height"}:
-                raise ValueError("crop cần đúng bốn trường x, y, width, height")
-            if any(type(v) is not int for v in value.values()):
-                raise ValueError("Tọa độ crop phải là số nguyên")
-            if value["x"] < 0 or value["y"] < 0 or value["width"] <= 0 or value["height"] <= 0:
-                raise ValueError("crop cần x/y >= 0 và width/height > 0")
-        elif kind == "bool":
+        if kind == "bool":
             if type(value) is not bool:
                 raise ValueError(f"{name} phải là true hoặc false")
         elif kind == "enum":
@@ -283,44 +249,22 @@ def validate_settings(settings):
     return dict(settings)
 
 
-def rotated_dimensions(width, height, settings):
-    total = (settings.get("rotate_fixed", 0) + settings.get("angle", 0)) % 360
-    if abs(total / 90 - round(total / 90)) < 1e-9:
-        return (height, width) if round(total / 90) % 2 else (width, height)
-    rad = math.radians(total)
-    return (math.ceil(height * abs(math.sin(rad)) + width * abs(math.cos(rad))),
-            math.ceil(height * abs(math.cos(rad)) + width * abs(math.sin(rad))))
-
-
 def process_image(image, settings=None, *, mods=None):
     """Trả (ảnh BGR, histogram BGR hoặc None, metadata); không đọc/ghi file."""
     values = validate_settings({} if settings is None else settings)
     if not isinstance(image, np.ndarray) or image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3 or not image.size:
         raise ValueError("image phải là ảnh BGR uint8 có ba kênh")
     height, width = image.shape[:2]
-    rotated_w, rotated_h = rotated_dimensions(width, height, values)
-    if max(width * height, rotated_w * rotated_h) > MAX_PIXELS:
-        raise ValueError("Ảnh nguồn hoặc ảnh sau xoay vượt giới hạn 32 triệu pixel")
-    crop = values.get("crop")
-    effective_w, effective_h = rotated_w, rotated_h
-    if crop:
-        if crop["x"] + crop["width"] > rotated_w or crop["y"] + crop["height"] > rotated_h:
-            raise ValueError("Vùng crop vượt ra ngoài ảnh sau xoay")
-        effective_w, effective_h = crop["width"], crop["height"]
-    output_w = values.get("width", 0) or effective_w
-    output_h = values.get("height", 0) or effective_h
+    if width * height > MAX_PIXELS:
+        raise ValueError("Ảnh nguồn vượt giới hạn 32 triệu pixel")
+    output_w = values.get("width", 0) or width
+    output_h = values.get("height", 0) or height
     if output_w * output_h > MAX_PIXELS:
         raise ValueError("Ảnh đầu ra vượt giới hạn 32 triệu pixel")
     if mods is None:
         mods, _ = discover()
     rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    cropped = None
-    if crop:
-        rotated = rotate_source(mods, rgb, values)
-        x, y, w, h = (crop[k] for k in ("x", "y", "width", "height"))
-        cropped = np.ascontiguousarray(rotated[y:y+h, x:x+w])
-    result, chart, meta = process_pipeline(mods, rgb, values, cropped)
+    result, chart, meta = process_pipeline(mods, rgb, values)
     meta.update({"source_size": {"width": width, "height": height},
-                 "output_size": {"width": result.shape[1], "height": result.shape[0]},
-                 "crop": crop})
+                 "output_size": {"width": result.shape[1], "height": result.shape[0]}})
     return cv2.cvtColor(result, cv2.COLOR_RGB2BGR), (None if chart is None else cv2.cvtColor(chart, cv2.COLOR_RGB2BGR)), meta

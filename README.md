@@ -33,7 +33,7 @@ Hàm tích hợp chính là `src.processing.process_image(image, settings=None, 
 
 1. `result`: ảnh kết quả BGR uint8.
 2. `histogram`: ảnh biểu đồ BGR uint8, hoặc None nếu không bật biểu đồ.
-3. `metadata`: thông tin kích thước nguồn, kích thước đầu ra, crop và các bước đã áp dụng.
+3. `metadata`: thông tin kích thước nguồn, kích thước đầu ra và các bước đã áp dụng.
 
 Hàm không đọc file, lưu ảnh hay tạo HTTP response. Backend tự giải mã ảnh upload, gọi hàm và mã hóa kết quả theo định dạng cần trả cho frontend.
 
@@ -51,7 +51,7 @@ Tên tham số theo nhóm:
 - Màu sắc: `temperature`, `tint`, `vibrance`, `saturation`.
 - Khử nhiễu: `median_enabled` và `median_kernel_size`; `bilateral_enabled` và `bilateral_sigma_color`; `nlm_enabled` và `nlm_h`; `guided_enabled` và `guided_smoothness`.
 - Chi tiết và hiệu ứng: `deblur_strength`, `sharpness`, `texture`, `clarity`, `dehaze`, `vignette`.
-- Hình học: `rotate_fixed`, `angle`, `crop`, `width`, `height`.
+- Kích thước ảnh: `width`, `height`.
 - Biểu đồ: `histogram_enabled`, `histogram_mode`, `histogram_normalize`.
 
 Lấy giới hạn và mặc định từ schema thay vì tự ghi cố định ở frontend. Không truyền các tên kỹ thuật nội bộ như gamma hoặc eps. HSL và Threshold không nằm trong schema/pipeline công khai.
@@ -66,13 +66,11 @@ Lấy giới hạn và mặc định từ schema thay vì tự ghi cố định 
 
 Mỗi lượt chỉnh phải xử lý lại từ ảnh nguồn. Không dùng ảnh kết quả lần trước làm nguồn vì hiệu ứng sẽ cộng dồn và resize nhiều lần làm mất nét.
 
-## Crop, kích thước và lỗi
+## Kích thước và lỗi
 
-Crop gồm bốn số nguyên x, y, width, height, tính theo pixel của ảnh sau xoay. Vùng cắt phải nằm hoàn toàn trong ảnh. Không truyền crop hoặc đặt None để bỏ vùng cắt.
+Width và height là kích thước đầu ra theo pixel. Giá trị 0 giữ chiều tương ứng của ảnh nguồn; hai chiều độc lập, không tự giữ tỷ lệ.
 
-Width và height là kích thước đầu ra theo pixel. Giá trị 0 giữ chiều tương ứng sau xoay/crop; hai chiều độc lập, không tự giữ tỷ lệ. Góc xoay dương ngược chiều kim đồng hồ.
-
-Nguồn, khung sau xoay và đầu ra bị giới hạn ở 32 triệu pixel; mỗi chiều resize tối đa 16384. Góc xoay bất kỳ mở rộng khung nên có thể vượt giới hạn dù ảnh nguồn chưa quá lớn.
+Ảnh nguồn và đầu ra bị giới hạn ở 32 triệu pixel; mỗi chiều resize tối đa 16384. Các tham số cắt/xoay không còn được hỗ trợ và sẽ bị từ chối khi truyền vào settings.
 
 Process_image tự kiểm tra tham số; backend bắt ValueError và chuyển thành thông báo phù hợp. Có thể gọi riêng `src.processing.validate_settings()` nếu muốn kiểm tra trước. Backend tự quy định giới hạn upload và số tác vụ đồng thời; giới hạn của HTTP API mẫu không tự áp dụng khi gọi hàm trực tiếp.
 

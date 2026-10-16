@@ -14,7 +14,7 @@ class ImageApiError(RuntimeError):
 
 
 def editor_image(value):
-    """Chuẩn hóa ảnh nguồn RGB từ upload/ImageEditor, không xử lý hiệu ứng."""
+    """Chuẩn hóa ảnh nguồn RGB từ upload, không xử lý hiệu ứng."""
     if isinstance(value, dict):
         value = value.get("composite") if value.get("composite") is not None else value.get("background")
     if value is None:
